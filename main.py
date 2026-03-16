@@ -80,20 +80,21 @@ def main():
         # 전체공연기간 파싱
         period = parse_performance_period(text)
         if period is None:
-            unregistered_seasons.append({
-                "공연명": std_name,
-                "raw_title": raw_title,
-                "period_start": "?",
-                "period_end": "?",
-            })
+            period_start, period_end = "?", "?"
             logger.warning(f"공연기간 파싱 실패: {raw_title}")
-            continue
-
-        period_start, period_end = period
+        else:
+            period_start, period_end = period
 
         # 시즌 매칭
-        matched_season = match_season(std_name, period_start, period_end, seasons)
-        if matched_season is None:
+        matched_season = None
+        season_id = None
+        season_missing = False
+        if period_start != "?":
+            matched_season = match_season(std_name, period_start, period_end, seasons)
+        if matched_season:
+            season_id = matched_season["id"]
+        else:
+            season_missing = True
             unregistered_seasons.append({
                 "공연명": std_name,
                 "raw_title": raw_title,
@@ -101,9 +102,6 @@ def main():
                 "period_end": period_end,
             })
             logger.warning(f"시즌 미등록: {std_name} ({period_start}~{period_end})")
-            continue
-
-        season_id = matched_season["id"]
 
         # 티켓오픈 정보 파싱
         open_infos = parse_open_info(text)
@@ -137,8 +135,8 @@ def main():
         for open_info in open_infos:
             open_round = open_info["기타"]
 
-            # 중복 체크
-            if check_duplicate(season_id, open_round, existing_opens):
+            # 중복 체크 (시즌이 있을 때만)
+            if season_id and check_duplicate(season_id, open_round, existing_opens):
                 duplicates.append({
                     "공연명": std_name,
                     "기타": open_round,
@@ -151,9 +149,9 @@ def main():
             venue = parse_venue(text) or api_data.get("venueName", "")
 
             # 전체공연기간 포맷
+            from mailer import _format_date
             전체공연기간 = ""
-            if period:
-                from mailer import _format_date
+            if period_start != "?":
                 전체공연기간 = f"{_format_date(period_start)} - {_format_date(period_end)}"
 
             new_items.append({
@@ -165,9 +163,11 @@ def main():
                 "오픈회차": open_info["오픈회차"],
                 "공연장": venue,
                 "전체공연기간": 전체공연기간,
+                "시즌미등록": season_missing,
                 "raw_title": raw_title,
             })
-            logger.info(f"신규 발견: {std_name} / {open_round}")
+            label = "신규(시즌미등록)" if season_missing else "신규"
+            logger.info(f"{label}: {std_name} / {open_round}")
 
     # 4. 리포트 생성 & 발송
     logger.info("Step 4: 메일 발송")
