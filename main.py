@@ -9,10 +9,10 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="repla
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 from scraper import run_scraper
-from parser import parse_open_info, parse_performance_period, parse_title, is_kids_musical
+from parser import parse_open_info, parse_performance_period, parse_venue, parse_title, is_kids_musical
 from podor_api import PodorAPI
 from matcher import match_performance_name, match_season, check_duplicate
-from mailer import build_report, send_email
+from mailer import build_report, build_excel, send_email
 
 logging.basicConfig(
     level=logging.INFO,
@@ -146,6 +146,16 @@ def main():
                 logger.info(f"중복 스킵: {std_name} / {open_round}")
                 continue
 
+            # 공연장: API 데이터 또는 텍스트 파싱
+            api_data = page_data.get("api_data", {})
+            venue = parse_venue(text) or api_data.get("venueName", "")
+
+            # 전체공연기간 포맷
+            전체공연기간 = ""
+            if period:
+                from mailer import _format_date
+                전체공연기간 = f"{_format_date(period_start)} - {_format_date(period_end)}"
+
             new_items.append({
                 "시즌": season_id,
                 "공연명": std_name,
@@ -153,6 +163,8 @@ def main():
                 "오픈시간": open_info["오픈시간"],
                 "기타": open_round,
                 "오픈회차": open_info["오픈회차"],
+                "공연장": venue,
+                "전체공연기간": 전체공연기간,
                 "raw_title": raw_title,
             })
             logger.info(f"신규 발견: {std_name} / {open_round}")
@@ -171,8 +183,11 @@ def main():
 
     subject = f"[NOL 티켓 오픈 알림] {today}"
 
+    # 엑셀 파일 생성 (신규 항목이 있을 때)
+    excel_path = build_excel(new_items)
+
     # 메일 발송 시도, 실패 시 stdout 출력
-    if not send_email(subject, report):
+    if not send_email(subject, report, excel_path=excel_path):
         logger.error("메일 발송 실패 — stdout으로 리포트 출력")
 
     # stdout에도 리포트 출력 (GitHub Actions 로그용)
