@@ -1,0 +1,35 @@
+name: Daily Ticket Open Scraper
+
+on:
+  schedule:
+    # 매일 오전 9시 KST = 자정 UTC
+    - cron: '0 0 * * *'
+  workflow_dispatch:  # 수동 실행 가능
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          playwright install chromium
+          playwright install-deps
+
+      - name: Run scraper
+        env:
+          PODOR_USER_ID: ${{ secrets.PODOR_USER_ID }}
+          PODOR_PASSWORD: ${{ secrets.PODOR_PASSWORD }}
+          SMTP_EMAIL: ${{ secrets.SMTP_EMAIL }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}
+        run: python main.py
