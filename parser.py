@@ -65,6 +65,48 @@ def parse_open_info(text: str) -> list[dict]:
         info["오픈회차"] = round_matches.get(차수, "")
         results.append(info)
 
+    # 패턴2: 데스노트 스타일
+    # "※ 9차 티켓오픈" + "- 일반예매 : 3월 19일(목) 오후 3시"
+    # + "- 9차 티켓오픈 공연기간 : 2026년 4월 21일(화) ~ 2026년 5월 3일(일)"
+    if not results:
+        alt_round = re.compile(r"※\s*([\w]+)\s*티켓오픈")
+        alt_date = re.compile(
+            r"일반예매\s*[:：]\s*(\d{1,2})월\s*(\d{1,2})일\s*(?:\([^)]*\))?\s*"
+            r"(오전|오후)\s*(\d{1,2})시(?:\s*(\d{1,2})분)?"
+        )
+        alt_period = re.compile(
+            r"티켓오픈\s*공연기간\s*[:：]\s*(.+?)(?:\n|$)"
+        )
+
+        round_m = alt_round.search(text)
+        date_m = alt_date.search(text)
+        period_m = alt_period.search(text)
+
+        if round_m and date_m:
+            차수 = round_m.group(1)
+            month = int(date_m.group(1))
+            day = int(date_m.group(2))
+            ampm = date_m.group(3)
+            hour = int(date_m.group(4))
+            minute = int(date_m.group(5)) if date_m.group(5) else 0
+            # 연도 추정: 현재 연도
+            from datetime import date as date_cls
+            year = date_cls.today().year
+
+            기간 = ""
+            if period_m:
+                기간 = period_m.group(1).strip()
+                기간 = re.sub(r"\d{4}년\s*", "", 기간)
+                기간 = re.sub(r"\([^)]*\)", "", 기간)
+                기간 = re.sub(r"\s*~\s*", " - ", 기간).strip()
+
+            results.append({
+                "오픈날짜": f"{year}-{month:02d}-{day:02d}",
+                "오픈시간": _convert_time(ampm, hour, minute),
+                "기타": 차수,
+                "오픈회차": 기간,
+            })
+
     # 차수 정렬 (1차, 2차, ... 마지막)
     def sort_key(r):
         g = r["기타"]
@@ -82,10 +124,20 @@ def parse_performance_period(text: str) -> tuple[str, str] | None:
     상세 페이지에서 전체 공연기간을 추출.
     반환: ("YYYY-MM-DD", "YYYY-MM-DD") 또는 None
     """
-    pattern = re.compile(
-        r"공연기간\s*[:：]?\s*(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})\s*~\s*(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})"
-    )
-    m = pattern.search(text)
+    # "공연기간 : 2026.1.30 ~ 2026.4.26" 또는 "관람일정\n2026.01.30 ~ 2026.04.26"
+    patterns = [
+        re.compile(
+            r"공연기간\s*[:：]?\s*(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})\s*~\s*(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})"
+        ),
+        re.compile(
+            r"관람일정\s*(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})\s*~\s*(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})"
+        ),
+    ]
+    m = None
+    for pattern in patterns:
+        m = pattern.search(text)
+        if m:
+            break
     if not m:
         return None
     start = f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
@@ -104,11 +156,16 @@ def parse_venue(text: str) -> str | None:
 
 def parse_title(text: str) -> str | None:
     """상세 페이지에서 공연명을 추출."""
-    pattern = re.compile(r"공연명\s*[:：]?\s*(.+?)(?:\n|$)")
-    m = pattern.search(text)
-    if not m:
-        return None
-    return m.group(1).strip()
+    # "- 공연명 : ..." 또는 "▷ 공 연 명 : ..." 형식 대응
+    patterns = [
+        re.compile(r"공연명\s*[:：]\s*(.+?)(?:\n|$)"),
+        re.compile(r"공\s*연\s*명\s*[:：]\s*(.+?)(?:\n|$)"),
+    ]
+    for pattern in patterns:
+        m = pattern.search(text)
+        if m:
+            return m.group(1).strip()
+    return None
 
 
 def is_kids_musical(title: str) -> bool:

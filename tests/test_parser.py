@@ -59,6 +59,20 @@ class TestParseOpenInfo:
         results = parse_open_info(text)
         assert len(results) == 0
 
+    def test_parse_alt_format(self):
+        """데스노트 스타일: ※ N차 티켓오픈 + 일반예매 : 날짜 시간"""
+        text = """
+※ 9차 티켓오픈
+- 일반예매 : 3월 19일(목) 오후 3시
+- 9차 티켓오픈 공연기간 : 2026년 4월 21일(화) ~ 2026년 5월 3일(일)
+"""
+        results = parse_open_info(text)
+        assert len(results) >= 1
+        r = results[0]
+        assert r["기타"] == "9차"
+        assert r["오픈시간"] == "15:00"
+        assert "4월 21일" in r["오픈회차"]
+
     def test_parse_am_pm_time(self):
         """오전/오후 시간 변환"""
         text = "※ 3차 티켓오픈 일시 : 2026년 4월 1일(화) 오후 8시"

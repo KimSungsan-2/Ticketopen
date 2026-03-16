@@ -95,8 +95,8 @@ def scrape_detail_page(page, url: str) -> dict | None:
         # 페이지 전체 텍스트 추출
         text_content = page.inner_text("body")
 
-        # 공연명 (페이지 상단 타이틀)
-        title_el = page.query_selector("h2, h1, .prdTitle")
+        # 공연명 (페이지 상단 타이틀 — [class*=title] 첫 번째 요소)
+        title_el = page.query_selector("[class*='title' i]")
         raw_title = title_el.inner_text().strip() if title_el else ""
 
         return {

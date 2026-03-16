@@ -1,6 +1,12 @@
 """NOL 티켓 오픈 스크래퍼 진입점"""
+import sys
+import io
 import logging
 from datetime import date
+
+# Windows cp949 인코딩 문제 방지
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 from scraper import run_scraper
 from parser import parse_open_info, parse_performance_period, parse_title, is_kids_musical
