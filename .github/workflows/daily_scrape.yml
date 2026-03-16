@@ -2,8 +2,8 @@ name: Daily Ticket Open Scraper
 
 on:
   schedule:
-    # 매일 오전 9시 KST = 자정 UTC
-    - cron: '0 0 * * *'
+    # 매일 새벽 3시 KST = 오후 6시 UTC
+    - cron: '0 18 * * *'
   workflow_dispatch:  # 수동 실행 가능
 
 jobs:
