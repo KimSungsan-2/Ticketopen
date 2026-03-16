@@ -65,11 +65,21 @@ def main():
             logger.info(f"어린이 뮤지컬 제외: {raw_title}")
             continue
 
-        # 공연명 파싱 (상세 페이지 텍스트에서)
-        parsed_title = parse_title(text) or raw_title
+        # 공연명 파싱 — 텍스트에서 추출 시도, 부실하면 raw_title 사용
+        parsed_title = parse_title(text)
+        if not parsed_title or len(parsed_title) <= 5:
+            parsed_title = raw_title
+        # list_title(API에서 가져온 제목)도 후보로
+        list_title = page_data.get("list_title", "")
 
-        # 공연명 매칭
-        matched_perf = match_performance_name(parsed_title, performances)
+        # 공연명 매칭 — parsed_title, raw_title, list_title 순서로 시도
+        matched_perf = None
+        for candidate in [parsed_title, raw_title, list_title]:
+            if not candidate:
+                continue
+            matched_perf = match_performance_name(candidate, performances)
+            if matched_perf:
+                break
         if matched_perf is None:
             match_failures.append({"raw_title": raw_title})
             logger.warning(f"매칭 실패: {raw_title}")
