@@ -1,9 +1,9 @@
 """인터파크 NOL 티켓 오픈 예정 스크래핑"""
 import time
 import logging
+import requests
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 from config import (
-    INTERPARK_NOTICE_URL,
     PAGE_TIMEOUT_MS,
     PAGE_DELAY_SEC,
     MAX_RETRIES,
@@ -12,80 +12,50 @@ from config import (
 
 logger = logging.getLogger(__name__)
 
+# 인터파크 내부 API
+NOTICE_LIST_API = "https://tickets.interpark.com/contents/api/open-notice/notice-list"
+DETAIL_BASE_URL = "https://tickets.interpark.com/contents/notice/detail"
 
-def _retry(func, *args, retries=MAX_RETRIES, delay=RETRY_DELAY_SEC):
-    """재시도 래퍼"""
-    for attempt in range(retries + 1):
+
+def fetch_notice_list() -> list[dict]:
+    """
+    인터파크 API로 뮤지컬/서울 오픈 예정 목록 조회.
+    반환: [{"noticeId": int, "title": str, "openDateStr": str, "venueName": str, ...}, ...]
+    """
+    params = {
+        "goodsGenre": "MUSICAL",
+        "goodsRegion": "SEOUL",
+        "offset": 0,
+        "pageSize": 100,
+        "sorting": "OPEN_ASC",
+    }
+
+    all_items = []
+    for attempt in range(MAX_RETRIES + 1):
         try:
-            return func(*args)
-        except (PlaywrightTimeout, Exception) as e:
-            if attempt == retries:
-                logger.error(f"Failed after {retries + 1} attempts: {e}")
-                raise
-            logger.warning(f"Attempt {attempt + 1} failed: {e}. Retrying in {delay}s...")
-            time.sleep(delay)
+            resp = requests.get(NOTICE_LIST_API, params=params, timeout=15)
+            resp.raise_for_status()
+            data = resp.json()
+            if isinstance(data, list):
+                all_items = data
+                break
+        except Exception as e:
+            if attempt == MAX_RETRIES:
+                logger.error(f"Failed to fetch notice list: {e}")
+                return []
+            logger.warning(f"API attempt {attempt + 1} failed: {e}")
+            time.sleep(RETRY_DELAY_SEC)
+
+    logger.info(f"Fetched {len(all_items)} items from API")
+    return all_items
 
 
-def scrape_notice_list(page) -> list[dict]:
-    """
-    인터파크 오픈 예정 목록에서 뮤지컬/서울 필터 적용 후 공연 목록 수집.
-    반환: [{"title": "공연명", "url": "상세URL"}, ...]
-    """
-    logger.info(f"Navigating to {INTERPARK_NOTICE_URL}")
-    page.goto(INTERPARK_NOTICE_URL, timeout=PAGE_TIMEOUT_MS)
-    page.wait_for_load_state("networkidle")
-    time.sleep(1)
-
-    # 장르 필터: 뮤지컬 선택
-    logger.info("Applying genre filter: 뮤지컬")
-    page.click('button[aria-label="장르 필터 열기"]')
-    time.sleep(0.5)
-    page.click('main.FilterDropDown_badge__cUHfo button:has-text("뮤지컬")')
-    time.sleep(1)
-
-    # 지역 필터: 서울 선택
-    logger.info("Applying region filter: 서울")
-    page.click('button[aria-label="지역 필터 열기"]')
-    time.sleep(0.5)
-    page.click('main.FilterDropDown_badge__cUHfo button:has-text("서울")')
-    time.sleep(1)
-
-    page.wait_for_load_state("networkidle")
-    time.sleep(1)
-
-    # 목록 수집 — 스크롤하며 모든 항목 로드
-    prev_count = 0
-    max_scroll_attempts = 20
-
-    for _ in range(max_scroll_attempts):
-        cards = page.query_selector_all('a[href*="/contents/notice/detail/"]')
-        current_count = len(cards)
-        if current_count == prev_count:
-            break  # 더 이상 새 항목 없음
-        prev_count = current_count
-        page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-        time.sleep(1)
-
-    items = []
-    cards = page.query_selector_all('a[href*="/contents/notice/detail/"]')
-    for card in cards:
-        href = card.get_attribute("href")
-        # 카드 내 공연명 텍스트 추출
-        title_el = card.query_selector("strong, h3, p")
-        title = title_el.inner_text().strip() if title_el else ""
-        if href:
-            full_url = f"https://tickets.interpark.com{href}" if href.startswith("/") else href
-            items.append({"title": title, "url": full_url})
-
-    logger.info(f"Found {len(items)} items in notice list")
-    return items
-
-
-def scrape_detail_page(page, url: str) -> dict | None:
+def scrape_detail_page(page, notice_id: int) -> dict | None:
     """
     상세 페이지에서 공연 정보 추출.
     반환: {"raw_title": str, "text_content": str, "url": str}
     """
+    url = f"{DETAIL_BASE_URL}/{notice_id}"
     try:
         logger.info(f"Scraping detail: {url}")
         page.goto(url, timeout=PAGE_TIMEOUT_MS)
@@ -95,7 +65,7 @@ def scrape_detail_page(page, url: str) -> dict | None:
         # 페이지 전체 텍스트 추출
         text_content = page.inner_text("body")
 
-        # 공연명 (페이지 상단 타이틀 — [class*=title] 첫 번째 요소)
+        # 공연명 (페이지 상단 타이틀)
         title_el = page.query_selector("[class*='title' i]")
         raw_title = title_el.inner_text().strip() if title_el else ""
 
@@ -115,8 +85,16 @@ def scrape_detail_page(page, url: str) -> dict | None:
 def run_scraper() -> list[dict]:
     """
     전체 스크래핑 실행.
-    반환: [{"raw_title": str, "text_content": str, "url": str}, ...]
+    1. API로 목록 조회
+    2. Playwright로 각 상세 페이지 스크래핑
+    반환: [{"raw_title": str, "text_content": str, "url": str, "list_title": str, "api_data": dict}, ...]
     """
+    # 1. API로 목록 조회 (Playwright 불필요)
+    notice_items = fetch_notice_list()
+    if not notice_items:
+        return []
+
+    # 2. Playwright로 상세 페이지 스크래핑
     results = []
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -126,19 +104,24 @@ def run_scraper() -> list[dict]:
         )
         page = context.new_page()
 
-        try:
-            items = _retry(scrape_notice_list, page)
-        except Exception as e:
-            logger.error(f"Failed to scrape notice list: {e}")
-            browser.close()
-            return []
+        for i, item in enumerate(notice_items):
+            notice_id = item["noticeId"]
+            list_title = item.get("title", "")
+            logger.info(f"[{i+1}/{len(notice_items)}] {list_title}")
 
-        for item in items:
-            detail = _retry(scrape_detail_page, page, item["url"])
+            detail = None
+            for attempt in range(MAX_RETRIES + 1):
+                detail = scrape_detail_page(page, notice_id)
+                if detail:
+                    break
+                logger.warning(f"Retry {attempt + 1} for notice {notice_id}")
+                time.sleep(RETRY_DELAY_SEC)
+
             if detail:
-                # 목록에서 가져온 제목도 함께 보관
-                detail["list_title"] = item["title"]
+                detail["list_title"] = list_title
+                detail["api_data"] = item
                 results.append(detail)
+
             time.sleep(PAGE_DELAY_SEC)
 
         browser.close()

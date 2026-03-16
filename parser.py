@@ -65,13 +65,14 @@ def parse_open_info(text: str) -> list[dict]:
         info["오픈회차"] = round_matches.get(차수, "")
         results.append(info)
 
-    # 패턴2: 데스노트 스타일
+    # 패턴2: 데스노트/홍련 스타일
     # "※ 9차 티켓오픈" + "- 일반예매 : 3월 19일(목) 오후 3시"
-    # + "- 9차 티켓오픈 공연기간 : 2026년 4월 21일(화) ~ 2026년 5월 3일(일)"
+    # 또는 "- 일반예매: 2026년 3월 20일(금) 오후 3시"
+    # + "- N차 티켓오픈 공연기간 : ..."
     if not results:
         alt_round = re.compile(r"※\s*([\w]+)\s*티켓오픈")
         alt_date = re.compile(
-            r"일반예매\s*[:：]\s*(\d{1,2})월\s*(\d{1,2})일\s*(?:\([^)]*\))?\s*"
+            r"일반예매\s*[:：]\s*(?:(\d{4})년\s*)?(\d{1,2})월\s*(\d{1,2})일\s*(?:\([^)]*\))?\s*"
             r"(오전|오후)\s*(\d{1,2})시(?:\s*(\d{1,2})분)?"
         )
         alt_period = re.compile(
@@ -84,14 +85,13 @@ def parse_open_info(text: str) -> list[dict]:
 
         if round_m and date_m:
             차수 = round_m.group(1)
-            month = int(date_m.group(1))
-            day = int(date_m.group(2))
-            ampm = date_m.group(3)
-            hour = int(date_m.group(4))
-            minute = int(date_m.group(5)) if date_m.group(5) else 0
-            # 연도 추정: 현재 연도
             from datetime import date as date_cls
-            year = date_cls.today().year
+            year = int(date_m.group(1)) if date_m.group(1) else date_cls.today().year
+            month = int(date_m.group(2))
+            day = int(date_m.group(3))
+            ampm = date_m.group(4)
+            hour = int(date_m.group(5))
+            minute = int(date_m.group(6)) if date_m.group(6) else 0
 
             기간 = ""
             if period_m:

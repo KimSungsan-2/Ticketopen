@@ -108,9 +108,30 @@ def main():
         # 티켓오픈 정보 파싱
         open_infos = parse_open_info(text)
         if not open_infos:
-            parse_failures.append({"raw_title": raw_title})
-            logger.warning(f"오픈 정보 파싱 실패: {raw_title}")
-            continue
+            # 폴백: API 데이터에서 오픈 일시 추출
+            api_data = page_data.get("api_data", {})
+            open_date_str = api_data.get("openDateStr", "")
+            open_type_str = api_data.get("openTypeStr", "")
+            if open_date_str:
+                # "2026-03-18 13:00:00" → 날짜와 시간 분리
+                parts = open_date_str.split(" ")
+                api_date = parts[0] if len(parts) >= 1 else ""
+                api_time = parts[1][:5] if len(parts) >= 2 else ""
+                # 오픈차수 추정: openTypeStr 또는 텍스트에서 추출
+                import re as _re
+                round_m = _re.search(r"(\d+)차|마지막|프리뷰", open_type_str + " " + text)
+                기타 = round_m.group(0) if round_m else open_type_str or "?"
+                open_infos = [{
+                    "오픈날짜": api_date,
+                    "오픈시간": api_time,
+                    "기타": 기타,
+                    "오픈회차": "",
+                }]
+                logger.info(f"API 폴백 사용: {raw_title} → {api_date} {api_time} ({기타})")
+            else:
+                parse_failures.append({"raw_title": raw_title})
+                logger.warning(f"오픈 정보 파싱 실패: {raw_title}")
+                continue
 
         # 각 오픈 차수별 처리
         for open_info in open_infos:
